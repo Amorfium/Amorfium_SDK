@@ -76,7 +76,7 @@ If you've contributed to the project and would like to be listed here, please su
 
 > Copyright © 2023-present Amorfium Team.
 
-This project is licensed under the terms of the [MIT License with Amorfium Team Exception](LICENSE).
+This project is licensed under the terms of the [MIT License with Amorfium Team Exception](LICENSE.md).
 
 ## Additional Information
 
