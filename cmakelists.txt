@@ -1,0 +1,136 @@
+cmake_minimum_required(VERSION 3.16)
+
+project("amorfium_sdk" LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Set the default name for the SDK
+set(AMF_SDK_NAME ${PROJECT_NAME})
+
+# Configure build output directories (bin/<build_type>/<sdk_name>)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY
+    ${CMAKE_BINARY_DIR}/bin/$<LOWER_CASE:$<CONFIG>>/${AMF_SDK_NAME})
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY
+    ${CMAKE_BINARY_DIR}/bin/$<LOWER_CASE:$<CONFIG>>/${AMF_SDK_NAME})
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY
+    ${CMAKE_BINARY_DIR}/bin/$<LOWER_CASE:$<CONFIG>>/${AMF_SDK_NAME})
+
+if(NOT DEFINED AMF_SDK_COMPILER_TYPE)
+  # Detect compiler type: 0 - Clang; 1 - MSVC or Clang-Cl
+  if(CMAKE_CXX_COMPILER_ID MATCHES Clang)
+    set(AMF_SDK_COMPILER_TYPE 0)
+  elseif(CMAKE_CXX_COMPILER_ID MATCHES MSVC
+         OR (CMAKE_CXX_COMPILER_ID MATCHES Clang
+             AND CMAKE_CXX_COMPILER_FRONTEND_VARIANT MATCHES MSVC))
+    set(AMF_SDK_COMPILER_TYPE 1)
+  else()
+    message(FATAL_ERROR "[AMF] Unsupported compiler")
+  endif()
+endif()
+
+if((NOT DEFINED AMF_SDK_BUILD_WITH_CRT) AND (NOT DEFINED
+                                             AMF_SDK_BUILD_WITH_SANITIZERS))
+  # Customize the project options for the desired purpose
+  option(AMF_SDK_BUILD_WITH_CRT "Build project with native CRT" OFF)
+  option(AMF_SDK_BUILD_WITH_SANITIZERS "Build project with sanitizers" OFF)
+
+  if(NOT AMF_SDK_BUILD_WITH_CRT AND AMF_SDK_BUILD_WITH_SANITIZERS)
+    message(FATAL_ERROR "[AMF] Sanitizers require native CRT")
+  endif()
+endif()
+
+#[[
+  @mxrz:
+  We need to create such a function to quickly and correctly set flags for the so that we don't have to do it manually.
+  The function takes arguments like
+  clang - option for the clang compiler
+  msvc - option for the msvc compiler
+  option_type - option type. It can be AMF_SDK_COMMON_OPTIONS, AMF_SDK_COMPILE_OPTIONS or AMF_SDK_LINK_OPTIONS.
+]]
+function(add_options_for_compilers clang msvc option_type)
+  # Get the current flags of the option type
+  set(TEMP_OPTIONS ${${option_type}})
+
+  # Replace spaces with semicolons
+  if(AMF_SDK_COMPILER_TYPE EQUAL 0)
+    string(REGEX REPLACE " " ";" TEMP_OPTIONS "${TEMP_OPTIONS} ${clang}")
+  elseif(AMF_SDK_COMPILER_TYPE EQUAL 1)
+    string(REGEX REPLACE " " ";" TEMP_OPTIONS "${TEMP_OPTIONS} ${msvc}")
+  endif()
+
+  # Set the new flags for the option type
+  set(${option_type}
+      ${TEMP_OPTIONS}
+      PARENT_SCOPE)
+endfunction()
+
+if((NOT DEFINED AMF_SDK_COMMON_OPTIONS)
+   AND (NOT DEFINED AMF_SDK_COMPILE_OPTIONS)
+   AND (NOT DEFINED AMF_SDK_LINK_OPTIONS))
+  #[[
+    @mxrz:
+    Some information about flags used in our project:
+    We have 3 types of options like AMF_SDK_COMMON_OPTIONS, AMF_SDK_COMPILE_OPTIONS and AMF_SDK_LINK_OPTIONS.
+    AMF_SDK_COMMON_OPTIONS - options used for both compiler and linker.
+    AMF_SDK_COMPILE_OPTIONS - options used for the compiler only.
+    AMF_SDK_LINK_OPTIONS - options used for linker only.
+
+    Now some explanation about the option flags themselves. I will use the following notation:
+    [<clang>] | [<msvc>] - this means we use <clang> for the Clang compiler and <msvc> for the MSVC compiler.
+    Since MSVC does not support such a flexible option system as Clang, if we do not have a counterpart for <clang_option>,
+    I will define it as null and explain what it means.
+
+    AMF_SDK_COMMON_OPTIONS:
+      [-m64] | [/machine:x64] - Build in 64-bit.
+      [-fvisibility=hidden] | [null] - Hide all symbols by default. MSVC does this automatically.
+      [-fsanitize=address,undefined] | [/fsanitize=address] - Enable sanitizers. MSVC doesn't support a full set of sanitizers.
+      [-nostdlib] | [/NODEFAULTLIB] - Disable linking to default libraries.
+
+    AMF_SDK_COMPILE_OPTIONS:
+      [-fno-rtti] | [/GR-] - Disable RTTI (Run-Time Type Information).
+      [-Wall;-Wextra;-Wpedantic;-Werror] | [/Wall;/WX] - Enable all warnings and treat them as errors.
+      [-fno-stack-protector] | [/GS-] - Disable stack protection.
+      [-fno-exceptions] | [/EHs-c-] - Disable exception handling.
+   ]]
+
+  add_options_for_compilers("-m64 -fvisibility=hidden -fno-rtti"
+                            "/machine:x64 /GR-" AMF_SDK_COMMON_OPTIONS)
+
+  add_options_for_compilers("-Wall -Wextra -Wpedantic -Werror" "/Wall /WX"
+                            AMF_SDK_COMPILE_OPTIONS)
+
+  if(AMF_SDK_BUILD_WITH_SANITIZERS)
+    add_options_for_compilers("-fsanitize=address,undefined"
+                              "/fsanitize=address" AMF_SDK_COMMON_OPTIONS)
+  elseif(NOT AMF_SDK_BUILD_WITH_CRT)
+    add_options_for_compilers("-nostdlib" "/NODEFAULTLIB"
+                              AMF_SDK_COMMON_OPTIONS)
+    add_options_for_compilers("-fno-stack-protector -fno-exceptions"
+                              "/GS- /EHs-c-" AMF_SDK_COMPILE_OPTIONS)
+  endif()
+
+  # Prepend common options
+  list(PREPEND AMF_SDK_COMPILE_OPTIONS ${AMF_SDK_COMMON_OPTIONS})
+  list(PREPEND AMF_SDK_LINK_OPTIONS ${AMF_SDK_COMMON_OPTIONS})
+
+  add_compile_definitions(
+    $<$<NOT:$<BOOL:${AMF_SDK_BUILD_WITH_CRT}>>:AMF_SDK_BUILD_WITHOUT_CRT>)
+
+  message(
+    NOTICE
+    "[AMF] Default project flags:
+    Build with native CRT: ${AMF_SDK_BUILD_WITH_CRT}
+    Build with sanitizers: ${AMF_SDK_BUILD_WITH_SANITIZERS}
+    Compiler Type: ${AMF_SDK_COMPILER_TYPE}
+    Compiler Options: ${AMF_SDK_COMPILE_OPTIONS}
+    Linker Options: ${AMF_SDK_LINK_OPTIONS}")
+else()
+  message(NOTICE "[AMF] Changes to default project flags are detected!")
+endif()
+
+add_compile_definitions($<$<CONFIG:Debug>:AMF_SDK_DEBUG>)
+
+add_subdirectory(src)
