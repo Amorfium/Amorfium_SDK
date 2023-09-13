@@ -80,6 +80,6 @@ This project is licensed under the terms of the [MIT License with Amorfium Team 
 
 ## Additional Information
 
-There are compilation and link flags set in the project (see [CMakeLists](src/cmakelists.txt)), please, if you are not very familiar with how they work, do not touch them, or override them at your own risk.
+There are compilation and link flags set in the project (see [CMakeLists](cmakelists.txt#L74)), please, if you are not very familiar with how they work, do not touch them, or override them at your own risk.
 
 Most of the necessary documentation is not yet done and documented, but we are working on it (you can always help us if you want to).
